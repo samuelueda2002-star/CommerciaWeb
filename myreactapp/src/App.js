@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
-import { getAllReports, getIndicators, getPerformance, reportsApi } from './api/dashboard';
-import { getCategories, getClients, getProducts, getSales } from './api/resources';
+import { getIndicators } from './api/dashboard';
+import { analyticsApi } from './api/analytics';
+import { getCategories, getClients, getProducts, getSales, listUsers } from './api/resources';
 import useApiQuery from './hooks/useApiQuery';
 import ClientForm from './components/ClientForm';
 import ClientDeleteDialog from './components/ClientDeleteDialog';
 import ProductForm from './components/ProductForm';
 import ProductDeleteDialog from './components/ProductDeleteDialog';
 import CategoryForm from './components/CategoryForm';
-import { changeNote, chartPoints, displayName, downloadReports, formatCurrency, formatNumber, numeric, periodDates, totalItems } from './utils/dashboard';
+import UserForm from './components/UserForm';
+import AnalyticsReports from './components/AnalyticsReports';
+import ForecastPanel from './components/ForecastPanel';
+import { DataFreshness, QueryFeedback } from './components/AnalyticsWidgets';
+import OrderForm from './components/OrderForm';
+import OrderDetails from './components/OrderDetails';
+import { analyticsPeriod, businessDate, chartPoints, displayName, effectivePrice, formatCurrency, formatDate, formatNumber } from './utils/dashboard';
 import './App.css';
 
 const iconPaths = {
@@ -30,7 +37,6 @@ const iconPaths = {
   lock: 'M6 10h12v9H6zM8.5 10V7.5a3.5 3.5 0 0 1 7 0V10M12 13.5v2',
   arrow: 'M5 12h14M14 7l5 5-5 5',
   trend: 'm4 16 5-5 4 3 7-8M16 6h4v4',
-  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
   send: 'm3 11 18-8-8 18-2-7zM11 14 21 3',
 };
 
@@ -178,10 +184,6 @@ function Topbar({ title, onMenu }) {
     <header className="topbar">
       <button className="menu-toggle" onClick={onMenu} aria-label="Abrir menu"><Icon name="menu" /></button>
       <h1>{title}</h1>
-      <div className="topbar-actions">
-        <button className="icon-button" aria-label="Notificações"><Icon name="bell" /></button>
-        <button className="pro-button">↑ Assinar Pro</button>
-      </div>
     </header>
   );
 }
@@ -220,13 +222,12 @@ function SalesChart({ title = 'Vendas — últimos 7 dias', points = [], period,
 function Dashboard({ onNavigate }) {
   const { session } = useAuth();
   const [period, setPeriod] = useState('current');
-  const query = useApiQuery(async (signal) => {
-    const indicators = await getIndicators(session.filialId, signal);
-    const points = period === 'current' ? indicators.last_7_days : await reportsApi.salesByWeekday(session.filialId, periodDates(period), signal);
-    return { indicators, points };
-  }, `dashboard:${session.filialId}:${period}`);
-  const indicators = query.data?.indicators;
-  const points = chartPoints(query.data?.points, period === 'previous');
+  const query = useApiQuery((signal) => getIndicators(session.filialId, signal), `dashboard:${session.filialId}`);
+  const status = useApiQuery((signal) => analyticsApi.status(session.filialId, {}, signal), `dashboard-status:${session.filialId}`);
+  const dates = analyticsPeriod(period, status.data?.last_sale_date, 7);
+  const chart = useApiQuery((signal) => analyticsApi.salesDaily(session.filialId, dates, signal), `dashboard-chart:${session.filialId}:${JSON.stringify(dates)}`, Boolean(dates));
+  const indicators = query.data;
+  const points = chartPoints(chart.data?.points?.map((point) => ({ date: point.date, total: point.revenue })));
   const dailySales = indicators?.sales_today?.total ?? indicators?.sales_today;
   const amount = (value, formatter = formatNumber) => query.loading ? '…' : formatter(value);
   const firstName = displayName(session.user).split(' ')[0];
@@ -241,55 +242,16 @@ function Dashboard({ onNavigate }) {
         <MetricCard icon="clients" label="Novos clientes" value={amount(indicators?.new_clients_today)} note="Cadastrados hoje" />
         <MetricCard icon="product" label="Produtos ativos" value={amount(indicators?.active_products)} note={indicators ? `Valor em estoque: ${formatCurrency(indicators.stock_value)}` : 'Estoque da filial'} />
       </section>
-      <SalesChart points={points} period={period} onPeriodChange={setPeriod} loading={query.loading} />
+      <DataFreshness query={status} />
+      <QueryFeedback query={chart} empty="Sem dados de vendas para o gráfico."><SalesChart title={period === 'previous' ? 'Vendas — 7 dias anteriores' : 'Vendas — últimos 7 dias com dados'} points={points} period={period} onPeriodChange={setPeriod} loading={chart.loading} /></QueryFeedback>
+      <ForecastPanel filialId={session.filialId} enabled={Boolean(status.data?.last_sale_date)} />
     </div>
   );
 }
 
 function Reports() {
   const { session } = useAuth();
-  const [period, setPeriod] = useState('current');
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState('');
-  const exportController = useRef(null);
-  const filters = periodDates(period);
-  const query = useApiQuery((signal) => getPerformance(session.filialId, filters, signal), `reports:${session.filialId}:${filters.start_date}:${filters.end_date}`);
-  useEffect(() => {
-    setExportError('');
-    setExporting(false);
-    return () => exportController.current?.abort();
-  }, [period]);
-  const exportReport = async () => {
-    if (exportController.current && !exportController.current.signal.aborted && exporting) return;
-    const controller = new AbortController();
-    exportController.current = controller;
-    setExporting(true);
-    setExportError('');
-    try {
-      const reports = await getAllReports(session.filialId, filters, controller.signal);
-      if (!controller.signal.aborted) downloadReports(reports, filters);
-    } catch (error) {
-      if (!controller.signal.aborted) setExportError(error.message);
-    } finally {
-      if (!controller.signal.aborted) setExporting(false);
-    }
-  };
-  const summary = query.data?.summary;
-  const comparison = query.data?.comparison;
-  const amount = (value, formatter = formatNumber) => query.loading ? '…' : formatter(value);
-  const error = query.error?.message || exportError;
-  return (
-    <div className="page-stack" aria-busy={query.loading || exporting}>
-      <PageIntro title="Visão geral de desempenho" subtitle={error || (query.loading ? 'Carregando relatórios...' : 'Acompanhe os principais resultados do seu negócio.')} error={Boolean(error)} action={query.error ? 'Tentar novamente' : exporting ? 'Exportando...' : 'Exportar relatório'} onAction={query.error ? query.retry : exportReport} disabled={query.loading || exporting} />
-      <section className="metrics-grid metrics-four">
-        <MetricCard icon="sales" label="Faturamento" value={amount(summary?.total_revenue, formatCurrency)} note={changeNote(comparison?.revenue_change_pct)} tone={numeric(comparison?.revenue_change_pct) < 0 ? 'negative' : 'positive'} />
-        <MetricCard icon="trend" label="Ticket médio" value={amount(summary?.average_ticket, formatCurrency)} note="No período selecionado" />
-        <MetricCard icon="clients" label="Cancelamentos" value={query.loading ? '…' : summary?.cancellation_rate == null ? '—' : `${formatNumber(summary.cancellation_rate)}%`} note="Taxa no período" tone="negative" />
-        <MetricCard icon="product" label="Itens vendidos" value={amount(totalItems(query.data?.categories))} note="Unidades no período" />
-      </section>
-      <SalesChart title="Faturamento por dia" points={chartPoints(query.data?.weekdays, true)} period={period} onPeriodChange={setPeriod} loading={query.loading} />
-    </div>
-  );
+  return <AnalyticsReports filialId={session.filialId} />;
 }
 
 function PageIntro({ title, subtitle, action, onAction, disabled = false, error = false }) {
@@ -339,7 +301,7 @@ function matches(value, search) {
 const recordStatuses = { active: 'Ativo', inactive: 'Inativo' };
 const orderStatuses = { pending: 'Pendente', paid: 'Pago', cancelled: 'Cancelado' };
 const clientName = (client) => `${client.first_name} ${client.last_name}`.trim();
-const dateLabel = (value) => value ? new Date(value).toLocaleDateString('pt-BR') : '—';
+const dateLabel = formatDate;
 
 function Products({ categoryId = '' }) {
   const { session } = useAuth();
@@ -372,7 +334,7 @@ function Products({ categoryId = '' }) {
     .map((product) => [
       product.name,
       categories.find((item) => item.id === product.category_id)?.name || '—',
-      formatCurrency(product.price?.price_offer ?? product.price?.price_default),
+      formatCurrency(effectivePrice(product.price)),
       product.stock ? `${formatNumber(product.stock.quantity)} un.` : '—',
       product.status === 'inactive' ? 'Inativo' : product.stock && product.stock.quantity <= 5 ? 'Baixo estoque' : recordStatuses[product.status] || product.status,
       <div className="table-actions">
@@ -419,7 +381,7 @@ function Clients() {
   };
   const clientRows = (query.data?.clients || []).filter((client) => matches(`${clientName(client)} ${client.email}`, search)).map((client) => [
     clientName(client), client.email, client.phone || '—',
-    `${query.data.orders.filter((order) => order.client_id === client.id && order.status !== 'cancelled').length} pedidos`,
+    `${query.data.purchaseCounts[client.id] || 0} pedidos`,
     recordStatuses[client.status] || client.status,
     <div className="table-actions">
       <button type="button" className="table-action-button" aria-label={`Editar ${clientName(client)}`} onClick={() => openForm(client)}><Icon name="edit" size={15} /> Editar</button>
@@ -487,35 +449,40 @@ function Categories({ onNavigate }) {
 
 function Sales() {
   const { session } = useAuth();
-  const query = useApiQuery((signal) => getSales(session.filialId, signal), `sales:${session.filialId}`);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [offset, setOffset] = useState(0);
+  const today = businessDate();
+  const dates = { start_date: `${today.slice(0, 7)}-01`, end_date: today };
+  const query = useApiQuery((signal) => getSales(session.filialId, signal, { offset, status, dates }), `sales:${session.filialId}:${offset}:${status}:${today}`);
+  const [creating, setCreating] = useState(false);
+  const [detailOrder, setDetailOrder] = useState(null);
+  const [success, setSuccess] = useState('');
   const orders = query.data?.orders || [];
   const clients = query.data?.clients || [];
   const clientsById = new Map(clients.map((client) => [client.id, client]));
-  const now = new Date();
-  const monthOrders = orders.filter((order) => {
-    const date = new Date(order.created_at);
-    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-  });
-  const validOrders = monthOrders.filter((order) => order.status !== 'cancelled');
   const salesRows = orders.filter((order) => !status || order.status === status).map((order) => {
     const client = clientsById.get(order.client_id);
-    return [`#${order.id}`, client ? clientName(client) : `Cliente #${order.client_id}`, dateLabel(order.created_at), formatCurrency(order.total), orderStatuses[order.status] || order.status];
+    return [`#${order.id}`, client ? clientName(client) : `Cliente #${order.client_id}`, dateLabel(order.created_at), formatCurrency(order.total), orderStatuses[order.status] || order.status, <button key={order.id} type="button" className="table-action-button" onClick={() => setDetailOrder(order.id)} aria-label={`Ver itens do pedido ${order.id}`}>Ver itens</button>];
   }).filter((row) => matches(`${row[0]} ${row[1]}`, search));
   const amount = (value, formatter = formatNumber) => query.loading ? '…' : query.error ? '—' : formatter(value);
   return (
     <div className="page-stack" aria-busy={query.loading}>
-      <PageIntro title="Pedidos e vendas" subtitle="Acompanhe cada venda do pagamento à entrega." action={query.error ? 'Tentar novamente' : 'Nova venda'} onAction={query.retry} disabled={!query.error} />
+      <PageIntro title="Pedidos e vendas" subtitle="Acompanhe cada venda do pagamento à entrega." action="Nova venda" onAction={() => { setSuccess(''); setCreating(true); }} />
+      {success && <p className="form-feedback form-feedback-success" role="status">{success}</p>}
+      {query.error && <div className="record-list-error"><p role="alert">{query.error.message}</p><button className="secondary-button" onClick={query.retry}>Tentar novamente</button></div>}
       <section className="metrics-grid">
-        <MetricCard icon="sales" label="Total no mês" value={amount(validOrders.reduce((sum, order) => sum + Number(order.total), 0), formatCurrency)} note="Pedidos não cancelados" />
-        <MetricCard icon="report" label="Pedidos" value={amount(monthOrders.length)} note={query.data ? `${monthOrders.filter((order) => order.status === 'pending').length} pendentes no mês` : 'No mês atual'} />
-        <MetricCard icon="clients" label="Clientes atendidos" value={amount(new Set(validOrders.map((order) => order.client_id)).size)} note="No mês atual" />
+        <MetricCard icon="sales" label="Total no mês" value={amount(query.data?.metrics.revenue, formatCurrency)} note="Pedidos não cancelados" />
+        <MetricCard icon="report" label="Pedidos" value={amount(query.data?.metrics.orders)} note={query.data ? `${query.data.metrics.pending} pendentes no mês` : 'No mês atual'} />
+        <MetricCard icon="clients" label="Clientes atendidos" value={amount(query.data?.metrics.clients)} note="No mês atual" />
       </section>
       <article className="panel data-panel">
-        <Toolbar placeholder="Buscar pedido..." value={search} onChange={setSearch}><select aria-label="Status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Todos os status</option><option value="paid">Pago</option><option value="pending">Pendente</option><option value="cancelled">Cancelado</option></select></Toolbar>
-        <DataTable columns={['Pedido', 'Cliente', 'Data', 'Total', 'Status']} rows={salesRows} statusIndex={4} loading={query.loading} error={query.error} />
+        <Toolbar placeholder="Buscar pedido nesta página..." value={search} onChange={setSearch}><select aria-label="Status" value={status} onChange={(event) => { setStatus(event.target.value); setOffset(0); }}><option value="">Todos os status</option><option value="paid">Pago</option><option value="pending">Pendente</option><option value="cancelled">Cancelado</option></select></Toolbar>
+        <DataTable columns={['Pedido', 'Cliente', 'Data', 'Total líquido', 'Status', 'Itens']} rows={salesRows} statusIndex={4} loading={query.loading} error={query.error} />
+        <nav className="sales-pagination" aria-label="Paginação das vendas"><button type="button" className="secondary-button" onClick={() => setOffset((value) => Math.max(0, value - 50))} disabled={query.loading || offset === 0}>Anterior</button><span>{query.data ? `${query.data.total ? offset + 1 : 0}–${Math.min(offset + orders.length, query.data.total)} de ${formatNumber(query.data.total)}` : 'Carregando...'}</span><button type="button" className="secondary-button" onClick={() => setOffset((value) => value + 50)} disabled={query.loading || !query.data || offset + orders.length >= query.data.total}>Próxima</button></nav>
       </article>
+      {creating && <OrderForm filialId={session.filialId} onClose={() => setCreating(false)} onSaved={(order) => { setCreating(false); setOffset(0); setStatus(''); setSuccess(`Venda #${order.id} registrada. Total: ${formatCurrency(order.total)}.`); query.retry(); }} />}
+      {detailOrder !== null && <OrderDetails orderId={detailOrder} onClose={() => setDetailOrder(null)} />}
     </div>
   );
 }
@@ -547,15 +514,20 @@ function Chat() {
 function Users() {
   const { session } = useAuth();
   const [search, setSearch] = useState('');
-  const user = session.user;
-  const userRows = matches(`${displayName(user)} ${user.email}`, search) ? [[displayName(user), user.email, user.is_superuser ? 'Administrador' : 'Usuário', '—', 'Ativo']] : [];
+  const [creating, setCreating] = useState(false);
+  const [success, setSuccess] = useState('');
+  const query = useApiQuery((signal) => listUsers(signal), `users:${session.filialId}`);
+  const userRows = (query.data || []).filter((user) => matches(`${displayName(user)} ${user.email}`, search)).map((user) => [displayName(user), user.email, user.is_superuser ? 'Administrador' : user.groups?.map((group) => group.name).join(', ') || 'Usuário', formatDate(user.last_login), user.is_active ? 'Ativo' : 'Inativo']);
   return (
     <div className="page-stack">
-      <PageIntro title="Equipe e acessos" subtitle="Somente os dados da sua conta estão disponíveis no momento." action="Convidar usuário" disabled />
+      <PageIntro title="Equipe e acessos" subtitle="Usuários das lojas às quais você tem acesso." action="Convidar usuário" onAction={() => { setSuccess(''); setCreating(true); }} />
+      {success && <p className="form-feedback form-feedback-success" role="status">{success}</p>}
+      {query.error && <div className="record-list-error"><p role="alert">{query.error.message}</p><button className="secondary-button" onClick={query.retry}>Tentar novamente</button></div>}
       <article className="panel data-panel">
         <Toolbar placeholder="Buscar usuário..." value={search} onChange={setSearch} />
-        <DataTable columns={['Usuário', 'E-mail', 'Perfil', 'Último acesso', 'Status']} rows={userRows} statusIndex={4} />
+        <DataTable columns={['Usuário', 'E-mail', 'Perfil', 'Último acesso', 'Status']} rows={userRows} statusIndex={4} loading={query.loading} error={query.error} />
       </article>
+      {creating && <UserForm filialId={session.filialId} accessibleFilialIds={session.user.accessible_filial_ids} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); setSearch(''); setSuccess('Usuário cadastrado com sucesso.'); query.retry(); }} />}
     </div>
   );
 }

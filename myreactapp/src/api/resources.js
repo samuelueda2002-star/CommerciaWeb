@@ -1,4 +1,5 @@
 import { ApiError, request } from './client';
+import { reportsApi } from './dashboard';
 
 export async function listAll(path, filialId, signal) {
   const items = [];
@@ -15,10 +16,60 @@ export async function listAll(path, filialId, signal) {
   }
 }
 
-const listProducts = (filialId, signal) => listAll('/catalog/products', filialId, signal);
+export const listProducts = (filialId, signal) => listAll('/catalog/products', filialId, signal);
 export const listCategories = (filialId, signal) => listAll('/catalog/categories', filialId, signal);
 const listClients = (filialId, signal) => listAll('/clients', filialId, signal);
-const listOrders = (filialId, signal) => listAll('/orders', filialId, signal);
+
+function safeUser({ id, username, full_name, email, is_superuser, is_active, last_login, groups }) {
+  // Authentication secrets returned by the current server never enter UI state.
+  return { id, username, full_name, email, is_superuser, is_active, last_login, groups };
+}
+
+export async function listUsers(signal) {
+  const users = await listAll('/users', undefined, signal);
+  return users.map(safeUser);
+}
+
+export async function getUserCreationOptions(accessibleFilialIds, signal) {
+  const [groups, companies] = await Promise.all([
+    request('/users/groups', { signal }), request('/companies', { signal }),
+  ]);
+  if (!Array.isArray(groups) || !Array.isArray(companies)) throw new ApiError('A API retornou perfis ou filiais inválidos.');
+  const allowed = new Set(accessibleFilialIds);
+  return {
+    groups: groups.map(({ id, name }) => ({ id, name })),
+    filials: companies.filter((company) => allowed.has(company.id)).map((company) => ({
+      id: company.id, name: company.fantasy_name || company.corporate_name, code: company.filial_code,
+    })),
+  };
+}
+
+export async function createUser(user, signal) {
+  const { full_name, username, email, password, group_ids, filial_ids } = user;
+  const result = await request('/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ full_name, username, email, password, group_ids, filial_ids }), signal,
+  });
+  return safeUser(result);
+}
+
+export async function getOrderOptions(filialId, signal) {
+  const [products, clients] = await Promise.all([listProducts(filialId, signal), listClients(filialId, signal)]);
+  return { products: await enrichProducts(products.filter((product) => product.status === 'active'), signal), clients: clients.filter((client) => client.status === 'active') };
+}
+
+export function createOrder(filialId, order, signal) {
+  // Whitelist the online contract. Prices, totals and offline-only fields never leave the browser.
+  const { client_id, payment_method, discount, items } = order;
+  return request('/orders', {
+    method: 'POST', query: { filial_id: filialId }, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id, payment_method, discount, items: items.map(({ product_id, quantity }) => ({ product_id, quantity })) }), signal,
+  });
+}
+
+export function getOrder(orderId, signal) {
+  return request(`/orders/${orderId}`, { signal });
+}
 
 async function optionalResource(path, signal) {
   try {
@@ -76,8 +127,8 @@ export function deleteProduct(productId, signal) {
 }
 
 export async function getClients(filialId, signal) {
-  const [clients, orders] = await Promise.all([listClients(filialId, signal), listOrders(filialId, signal)]);
-  return { clients, orders };
+  const [clients, sales] = await Promise.all([listClients(filialId, signal), listAll('/dashboard/reports/sales-by-client', filialId, signal)]);
+  return { clients, purchaseCounts: Object.fromEntries(sales.map((item) => [item.client_id, item.total_orders])) };
 }
 
 export function createClient(filialId, client, signal) {
@@ -133,7 +184,19 @@ export function updateCategory(categoryId, category, signal) {
   });
 }
 
-export async function getSales(filialId, signal) {
-  const [orders, clients] = await Promise.all([listOrders(filialId, signal), listClients(filialId, signal)]);
-  return { orders, clients };
+export async function getSales(filialId, signal, { offset = 0, status = '', dates = {} } = {}) {
+  const [page, clients, summary, statuses, byClient] = await Promise.all([
+    request('/orders', { query: { filial_id: filialId, limit: 50, offset, status }, signal }),
+    listClients(filialId, signal),
+    reportsApi.salesSummary(filialId, dates, signal),
+    reportsApi.salesByStatus(filialId, { ...dates, limit: 200 }, signal),
+    reportsApi.salesByClient(filialId, { ...dates, limit: 1 }, signal),
+  ]);
+  if (!Array.isArray(page?.items) || !Number.isInteger(page.total)) throw new ApiError('A API retornou uma listagem de vendas inválida.');
+  return { orders: page.items, total: page.total, clients, metrics: {
+    revenue: summary.total_revenue,
+    orders: summary.total_orders + summary.cancelled_orders,
+    pending: statuses.items?.find((item) => item.status === 'pending')?.count ?? 0,
+    clients: byClient.total,
+  } };
 }

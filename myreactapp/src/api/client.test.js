@@ -62,6 +62,7 @@ test('never sends filial_id to the cross-branch report', async () => {
 });
 
 test('exports all sixteen documented reports with the required comparison dates', async () => {
+  fetch.mockResolvedValue(response({ items: [], total: 0 }));
   await getAllReports(7, { start_date: '2026-10-01', end_date: '2026-10-07' });
   expect(fetch).toHaveBeenCalledTimes(16);
   const comparisonUrl = fetch.mock.calls.find(([url]) => url.includes('/sales-comparison'))[0];

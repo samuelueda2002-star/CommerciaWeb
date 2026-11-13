@@ -47,7 +47,8 @@ export function saveAccessToken(token, remember = false) {
 
 function errorMessage(status, payload) {
   if (status === 401) return 'Sessão expirada ou credenciais inválidas. Entre novamente.';
-  if (status === 403) return 'Você não tem permissão para acessar os dados desta filial.';
+  if (status === 403) return typeof payload?.detail === 'string' && !['Forbidden', 'Not enough permissions'].includes(payload.detail)
+    ? payload.detail : 'Você não tem permissão para acessar os dados desta filial.';
   if (status >= 500) return 'A API está indisponível no momento. Tente novamente.';
   const detail = payload?.detail;
   if (typeof detail === 'string') return detail;

@@ -9,8 +9,11 @@ export async function login(username, password, signal) {
   return result.access_token;
 }
 
-export function getCurrentUser(token, signal) {
-  return request('/auth/me', { token, signal });
+export async function getCurrentUser(token, signal) {
+  const result = await request('/auth/me', { token, signal });
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new ApiError('A API retornou uma conta inválida.');
+  const { id, username, full_name, email, is_superuser, accessible_filial_ids } = result;
+  return { id, username, full_name, email, is_superuser, accessible_filial_ids };
 }
 
 export function getFilialId(user) {
