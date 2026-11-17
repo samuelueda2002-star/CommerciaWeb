@@ -15,6 +15,7 @@ import ForecastPanel from './components/ForecastPanel';
 import { DataFreshness, QueryFeedback } from './components/AnalyticsWidgets';
 import OrderForm from './components/OrderForm';
 import OrderDetails from './components/OrderDetails';
+import Purchases from './components/Purchases';
 import { analyticsPeriod, businessDate, chartPoints, displayName, effectivePrice, formatCurrency, formatDate, formatNumber } from './utils/dashboard';
 import './App.css';
 
@@ -25,6 +26,7 @@ const iconPaths = {
   clients: 'M16 20v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 10a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM17 11a3 3 0 0 0 0-6M21 20v-2a4 4 0 0 0-3-3.87',
   category: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM17 14v6M14 17h6',
   sales: 'M4 6h16v12H4zM4 10h16M8 15h3',
+  purchase: 'M3 3h2l3 12h10l3-9H6M9 20h.01M17 20h.01',
   chat: 'M4 5h16v11H8l-4 4zM8 9h8M8 12h5',
   users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM19 8v6M16 11h6',
   search: 'M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Zm5-2 4 4',
@@ -131,13 +133,14 @@ const navGroups = [
   { label: 'Visão geral', items: [{ id: 'dashboard', label: 'Dashboard', icon: 'dashboard' }, { id: 'reports', label: 'Relatórios', icon: 'report' }] },
   { label: 'Cadastros', items: [{ id: 'products', label: 'Produtos', icon: 'product' }, { id: 'clients', label: 'Clientes', icon: 'clients' }, { id: 'categories', label: 'Categorias', icon: 'category' }] },
   { label: 'Vendas', items: [{ id: 'sales', label: 'Vendas', icon: 'sales' }] },
+  { label: 'Compras', items: [{ id: 'purchases', label: 'Compras', icon: 'purchase' }] },
   { label: 'Plano Hulk', items: [{ id: 'chat', label: 'Chat com IA', icon: 'chat', badge: 'HULK' }] },
   { label: 'Administração', items: [{ id: 'users', label: 'Usuários', icon: 'users', badge: 'ADMIN' }] },
 ];
 
 const pageTitles = {
   dashboard: 'Dashboard', reports: 'Relatórios', products: 'Produtos', clients: 'Clientes',
-  categories: 'Categorias', sales: 'Vendas', chat: 'Chat com IA', users: 'Usuários',
+  categories: 'Categorias', sales: 'Vendas', purchases: 'Compras', chat: 'Chat com IA', users: 'Usuários',
 };
 
 function Sidebar({ activePage, onNavigate, isOpen, onClose, onLogout }) {
@@ -532,7 +535,7 @@ function Users() {
   );
 }
 
-const pages = { dashboard: Dashboard, reports: Reports, products: Products, clients: Clients, categories: Categories, sales: Sales, chat: Chat, users: Users };
+const pages = { dashboard: Dashboard, reports: Reports, products: Products, clients: Clients, categories: Categories, sales: Sales, purchases: Purchases, chat: Chat, users: Users };
 
 function MenuScreen({ onLogout }) {
   const [activePage, setActivePage] = useState('dashboard');

@@ -26,6 +26,7 @@ npm start
 | Clientes | Cadastro, edição e exclusão com confirmação; contatos e contagem de pedidos não cancelados; busca por nome e e-mail |
 | Categorias | Cadastro e edição com departamento, contagem de produtos da filial e navegação para o catálogo filtrado |
 | Vendas | Cadastro online, pedidos paginados, detalhamento dos descontos e valores líquidos, totais do mês, busca na página e filtro de status |
+| Compras | Consulta por situação, fornecedor e período, conferência dos itens e confirmação de recebimentos pendentes |
 | Dashboard e relatórios | Indicadores operacionais, analytics por período/entidade, ranking, rupturas de estoque, previsões, avaliações de modelos e exportação JSON |
 | Usuários | Cadastro com perfis e filiais pelo botão Convidar usuário; listagem paginada das lojas acessíveis |
 
@@ -101,6 +102,20 @@ O cadastro envia `POST /users` com apenas `full_name`, `username`, `email`, `pas
 Apesar do nome do botão, a API cria a conta diretamente com a senha informada: não há envio de convite por e-mail. Senhas de novos usuários não são salvas no armazenamento do navegador. A criação foi validada com respostas HTTP simuladas nos testes; nenhuma conta de teste foi criada no servidor compartilhado. O chat continua indisponível, e a API ainda não oferece exclusão de categorias.
 
 O contrato atual de `/auth/me` e `/users` inclui `password_hash`. Os adaptadores do site descartam esse campo antes de guardar a conta na sessão ou alimentar as tabelas. **O backend também deve removê-lo das respostas HTTP**; o descarte no cliente não elimina a exposição na rede.
+
+## Compras e recebimentos — 17/11/2026
+
+O menu **Compras** consulta `GET /purchases` com a filial da sessão e páginas de 50 registros. Os filtros de situação, fornecedor e datas são enviados à API. A busca textual considera os registros da página atual. **Atualizar lista** consulta novamente as compras enviadas pelo aplicativo. Os fornecedores vêm de `GET /people?role=supplier`, com paginação, mantendo apenas identificador e nome para exibição. Uma falha nessa consulta permite continuar a conferência pelos códigos dos fornecedores.
+
+**Conferir compra** consulta `GET /purchases/{id}` e mostra fornecedor, nota fiscal, chave da NF-e, datas, referência de sincronização e observações. Os itens exibem quantidade, custo unitário, total bruto, desconto e frete rateados, total líquido e custo final por unidade. Os valores são os retornados pelo servidor. Os nomes são consultados em `GET /catalog/products/{id}` e os códigos permanecem disponíveis quando os nomes falham.
+
+Para confirmar um recebimento, escolha **Pendentes**, abra **Conferir compra**, confira os itens e marque a declaração de conferência. **Confirmar recebimento** envia `POST /purchases/{id}/receive` sem corpo. O aviso informa que a confirmação registra a entrada integral no estoque da filial e pode atualizar os custos dos produtos. A ação exige uma compra pendente da filial atual com itens disponíveis para conferência. Durante o envio, os controles impedem cliques repetidos e fechamento da janela. Após a API confirmar a situação `received`, a janela fecha e a listagem é recarregada.
+
+Uma falha na confirmação mantém a janela aberta e consulta novamente a compra para verificar seu estado atual. Uma nova tentativa exige marcar novamente a conferência. Se outra pessoa já recebeu a compra, o detalhe passa a mostrar a situação retornada pela API. Respostas 403 preservam a sessão e exibem a falta de permissão.
+
+O contrato de sincronização consultado em 17/11/2026 informa que as compras enviadas por `/sync/push` já são criadas como `received` e movimentam o estoque. Essas compras aparecem na consulta com sua origem e seu recebimento registrado. A confirmação fica disponível para registros com situação `pending`.
+
+As consultas autorizadas à conta de teste retornaram zero compras e zero fornecedores na filial acessível. O fluxo de confirmação foi verificado com respostas HTTP simuladas nos testes automatizados. A validação no servidor compartilhado utilizou somente consultas aos dados de negócio.
 
 ## Validação
 

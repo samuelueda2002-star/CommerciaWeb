@@ -105,6 +105,20 @@ test('authenticates the existing login form and loads indicators for the first a
   expect(indicatorsCall[1].headers.Authorization).toBe('Bearer test-token');
 });
 
+test('opens purchases through the navigation using the signed-in branch', async () => {
+  const baseFetch = fetch;
+  global.fetch = jest.fn((url, options) => /\/(purchases|people)\?/.test(url) ? Promise.resolve(response(page([]))) : baseFetch(url, options));
+  render(<App />);
+  await signIn();
+  fireEvent.click(screen.getByRole('button', { name: /^Compras$/ }));
+  expect(await screen.findByRole('heading', { name: 'Compras e recebimentos' })).toBeInTheDocument();
+  await screen.findByText('Nenhuma compra encontrada.');
+  const [url, options] = fetch.mock.calls.find(([value]) => value.includes('/purchases?'));
+  expect(url).toContain('filial_id=7');
+  expect(options.headers.Authorization).toBe('Bearer test-token');
+  expect(options.method).toBeUndefined();
+});
+
 test('rejects invalid credentials without opening the dashboard', async () => {
   fetch.mockResolvedValue(response({ detail: 'Invalid credentials' }, 401));
   render(<App />);

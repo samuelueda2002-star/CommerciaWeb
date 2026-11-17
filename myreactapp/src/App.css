@@ -403,6 +403,12 @@ tbody tr:hover { background: #fafbfe; }
 
 .record-dialog { width: min(620px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 28px; overflow-y: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: 0 24px 80px #17284f33; }
 .record-dialog::backdrop { background: #121a3299; }
+.record-dialog.purchase-dialog { width: min(1060px, calc(100% - 32px)); }
+.purchase-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin: 22px 0; }
+.purchase-summary div { min-width: 0; }
+.purchase-summary dt { color: #667187; font-size: 0.75rem; }
+.purchase-summary dd { margin: 6px 0 0; color: #4b556a; font-size: 0.84rem; overflow-wrap: anywhere; }
+.purchase-reference { overflow-wrap: anywhere; white-space: pre-wrap; }
 .record-dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .record-dialog-heading h2 { margin: 0 0 6px; font-size: 1.24rem; letter-spacing: -0.03em; }
 .record-dialog-heading p { margin: 0; color: #667187; font-size: 0.82rem; line-height: 1.5; }
